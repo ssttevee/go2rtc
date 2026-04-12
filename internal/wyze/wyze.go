@@ -33,7 +33,7 @@ func Init() {
 
 	streams.HandleFunc("wyze", func(rawURL string) (core.Producer, error) {
 		log.Debug().Msgf("wyze: dial %s", rawURL)
-		return wyze.NewProducer(rawURL)
+		return wyze.NewAnyProducer(rawURL)
 	})
 
 	api.HandleFunc("api/wyze", apiWyze)

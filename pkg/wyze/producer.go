@@ -21,12 +21,16 @@ type Producer struct {
 }
 
 func NewProducer(rawURL string) (*Producer, error) {
+	u, _ := url.Parse(rawURL)
+	if u != nil && u.Query().Get("proto") == "gwell" {
+		return nil, fmt.Errorf("wyze: gwell producer must be created via NewAnyProducer")
+	}
+
 	client, err := Dial(rawURL)
 	if err != nil {
 		return nil, err
 	}
 
-	u, _ := url.Parse(rawURL)
 	query := u.Query()
 
 	// 0 = HD (default), 1 = SD/360P, 2 = 720P, 3 = 2K, 4 = Floodlight
@@ -61,6 +65,17 @@ func NewProducer(rawURL string) (*Producer, error) {
 	}
 
 	return prod, nil
+}
+
+func NewAnyProducer(rawURL string) (core.Producer, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("wyze: invalid URL: %w", err)
+	}
+	if u.Query().Get("proto") == "gwell" {
+		return NewGWellProducer(rawURL)
+	}
+	return NewProducer(rawURL)
 }
 
 func (p *Producer) Start() error {
