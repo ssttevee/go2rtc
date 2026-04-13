@@ -12,6 +12,7 @@ import (
 type GWellClient struct {
 	session *gwelllib.Session
 	writer  *gwellAnnexBWriter
+	rawData chan *gwelllib.DecodedPayload
 	host    string
 	mac     string
 	verbose bool
@@ -46,20 +47,32 @@ func DialGWell(rawURL string) (*GWellClient, error) {
 	}
 
 	writer := newGWellAnnexBWriter()
+	rawData := make(chan *gwelllib.DecodedPayload, 256)
 	sess := gwelllib.NewSession(gwelllib.SessionConfig{
 		Token:       token,
 		CameraLanIP: cameraLANIP,
 		DeviceName:  query.Get("mac"),
 		H264Writer:  writer,
+		RawDataHandler: func(p *gwelllib.DecodedPayload) {
+			select {
+			case rawData <- p:
+			default:
+			}
+		},
 	})
 
 	return &GWellClient{
 		session: sess,
 		writer:  writer,
+		rawData: rawData,
 		host:    host,
 		mac:     query.Get("mac"),
 		verbose: query.Get("verbose") == "true",
 	}, nil
+}
+
+func (c *GWellClient) RawData() <-chan *gwelllib.DecodedPayload {
+	return c.rawData
 }
 
 func (c *GWellClient) ReadFrame() ([]byte, uint32, error) {

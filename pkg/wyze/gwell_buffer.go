@@ -45,7 +45,7 @@ func (w *gwellAnnexBWriter) Write(p []byte) (int, error) {
 		}
 		frame := append([]byte(nil), w.buf[:i]...)
 		w.buf = append(w.buf[:0], w.buf[i:]...)
-		if len(frame) == 0 {
+		if len(frame) < 5 {
 			continue
 		}
 		w.seq++
