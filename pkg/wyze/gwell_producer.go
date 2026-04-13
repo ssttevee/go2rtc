@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/AlexxIT/go2rtc/pkg/aac"
 	"github.com/AlexxIT/go2rtc/pkg/core"
 	"github.com/AlexxIT/go2rtc/pkg/h264"
 	"github.com/AlexxIT/go2rtc/pkg/h264/annexb"
@@ -15,8 +16,6 @@ type GWellProducer struct {
 	core.Connection
 	client *GWellClient
 }
-
-var gwellAudioCodec = &core.Codec{Name: core.CodecPCMA, ClockRate: 8000, Channels: 1, PayloadType: 8}
 
 type DecodedPayload = gwelllib.DecodedPayload
 
@@ -93,6 +92,7 @@ func (p *GWellProducer) Start() error {
 	var audioTS uint32
 	var audioSeq uint16
 	rawData := p.client.RawData()
+	audioCodec := p.audioCodec()
 	for {
 		_ = p.client.SetDeadline(time.Now().Add(core.ConnDeadline))
 		frame, ts, err := p.client.ReadFrame()
@@ -126,26 +126,63 @@ func (p *GWellProducer) Start() error {
 		for {
 			select {
 			case payload, ok := <-rawData:
-				if !ok || payload == nil || len(payload.Audio) == 0 {
+				if !ok {
+					goto nextFrame
+				}
+				if payload == nil || len(payload.Audio) == 0 {
+					continue
+				}
+				audioPayload := payload.Audio
+				if len(audioPayload) >= 7 && audioPayload[0] == 0xFF && (audioPayload[1]&0xF0) == 0xF0 {
+					audioPayload = stripADTSAAC(audioPayload)
+				}
+				if len(audioPayload) == 0 {
 					goto nextFrame
 				}
 				for _, recv := range p.Receivers {
-					if !recv.Codec.Match(gwellAudioCodec) {
+					if audioCodec == nil || !recv.Codec.Match(audioCodec) {
 						continue
 					}
 					recv.WriteRTP(&core.Packet{
-						Header:  rtp.Header{Version: 2, Marker: true, SequenceNumber: audioSeq, Timestamp: audioTS},
-						Payload: append([]byte(nil), payload.Audio...),
+						Header:  rtp.Header{Version: aac.RTPPacketVersionAAC, Marker: true, SequenceNumber: audioSeq, Timestamp: audioTS},
+						Payload: append([]byte(nil), audioPayload...),
 					})
 				}
 				audioSeq++
-				audioTS += uint32(len(payload.Audio))
+				audioTS += 1024
 			default:
 				goto nextFrame
 			}
 		}
 	nextFrame:
 	}
+}
+
+func (p *GWellProducer) audioCodec() *core.Codec {
+	if p == nil {
+		return nil
+	}
+	for _, media := range p.Medias {
+		if media.Kind != core.KindAudio || len(media.Codecs) == 0 {
+			continue
+		}
+		return media.Codecs[0]
+	}
+	return nil
+}
+
+func stripADTSAAC(b []byte) []byte {
+	if len(b) < 7 {
+		return nil
+	}
+	headerLen := 7
+	if b[1]&0x01 == 0 {
+		headerLen = 9
+	}
+	if len(b) <= headerLen {
+		return nil
+	}
+	return b[headerLen:]
 }
 
 func probeGWell(client *GWellClient) ([]*core.Media, error) {
@@ -170,6 +207,7 @@ func probeGWell(client *GWellClient) ([]*core.Media, error) {
 	buf := annexb.EncodeToAVCC(frame)
 	if len(buf) < 5 {
 		vcodec := &core.Codec{Name: core.CodecH264, ClockRate: 90000, PayloadType: core.PayloadTypeRAW}
+		acodec := &core.Codec{Name: core.CodecAAC}
 		client.writer.mu.Lock()
 		client.writer.queue = append([]gwellFrame{{payload: frame}}, client.writer.queue...)
 		client.writer.mu.Unlock()
@@ -180,7 +218,7 @@ func probeGWell(client *GWellClient) ([]*core.Media, error) {
 		}, {
 			Kind:      core.KindAudio,
 			Direction: core.DirectionRecvonly,
-			Codecs:    []*core.Codec{gwellAudioCodec.Clone()},
+			Codecs:    []*core.Codec{acodec},
 		}}, nil
 	}
 
@@ -189,6 +227,10 @@ func probeGWell(client *GWellClient) ([]*core.Media, error) {
 		vcodec = h264.AVCCToCodec(buf)
 	} else {
 		vcodec = &core.Codec{Name: core.CodecH264, ClockRate: 90000, PayloadType: core.PayloadTypeRAW}
+	}
+	acodec := probeGWellAudioCodec(client, 1500*time.Millisecond)
+	if acodec == nil {
+		acodec = &core.Codec{Name: core.CodecAAC}
 	}
 
 	client.writer.mu.Lock()
@@ -201,6 +243,32 @@ func probeGWell(client *GWellClient) ([]*core.Media, error) {
 	}, {
 		Kind:      core.KindAudio,
 		Direction: core.DirectionRecvonly,
-		Codecs:    []*core.Codec{gwellAudioCodec.Clone()},
+		Codecs:    []*core.Codec{acodec},
 	}}, nil
+}
+
+func probeGWellAudioCodec(client *GWellClient, timeout time.Duration) *core.Codec {
+	if client == nil {
+		return nil
+	}
+	deadline := time.Now().Add(timeout)
+	raw := client.RawData()
+	for time.Now().Before(deadline) {
+		select {
+		case payload, ok := <-raw:
+			if !ok || payload == nil || len(payload.Audio) == 0 {
+				continue
+			}
+			if aac.IsADTS(payload.Audio) {
+				codec := aac.ADTSToCodec(payload.Audio)
+				if codec != nil {
+					codec.PayloadType = core.PayloadTypeRAW
+					return codec
+				}
+			}
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	return nil
 }

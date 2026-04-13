@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AlexxIT/go2rtc/pkg/h264"
 	"github.com/AlexxIT/go2rtc/pkg/h264/annexb"
 )
 
@@ -45,6 +46,7 @@ func (w *gwellAnnexBWriter) Write(p []byte) (int, error) {
 		}
 		frame := append([]byte(nil), w.buf[:i]...)
 		w.buf = append(w.buf[:0], w.buf[i:]...)
+		frame = trimInvalidLeadingNALUs(frame)
 		if len(frame) < 5 {
 			continue
 		}
@@ -53,6 +55,34 @@ func (w *gwellAnnexBWriter) Write(p []byte) (int, error) {
 	}
 	w.cond.Broadcast()
 	return len(p), nil
+}
+
+func trimInvalidLeadingNALUs(b []byte) []byte {
+	for len(b) >= 5 {
+		if !(len(b) >= 4 && b[0] == 0 && b[1] == 0 && (b[2] == 1 || (b[2] == 0 && b[3] == 1))) {
+			return b
+		}
+		start := 4
+		if b[2] == 1 {
+			start = 3
+		}
+		if start >= len(b) {
+			return nil
+		}
+		naluType := b[start] & 0x1F
+		if naluType != 0 {
+			return b
+		}
+		next := annexb.IndexFrame(append([]byte{0, 0, 0, 1, 0x09, 0xF0}, b...))
+		if next <= 6 || next-6 >= len(b) {
+			return nil
+		}
+		b = b[next-6:]
+		if len(b) >= 5 && h264.NALUType(annexb.EncodeToAVCC(b)) != 0 {
+			return b
+		}
+	}
+	return b
 }
 
 func (w *gwellAnnexBWriter) ReadFrame() ([]byte, uint32, error) {
