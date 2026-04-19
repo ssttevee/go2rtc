@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path/filepath"
 
 	"github.com/AlexxIT/go2rtc/internal/api"
 	"github.com/AlexxIT/go2rtc/internal/app"
@@ -61,10 +62,63 @@ func getCloud(email string) (*wyze.Cloud, error) {
 func apiWyze(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
+		if r.URL.Query().Get("src") != "" {
+			apiTalkback(w, r)
+			return
+		}
 		apiDeviceList(w, r)
 	case "POST":
 		apiAuth(w, r)
 	}
+}
+
+func apiTalkback(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	src := query.Get("src")
+	if src == "" {
+		http.Error(w, "missing src", http.StatusBadRequest)
+		return
+	}
+
+	action := query.Get("action")
+	if action == "" {
+		action = "talk_header"
+	}
+
+	prod, err := getActiveGWellProducer(src)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	switch action {
+	case "talk_on":
+		err = prod.SetDuoTalkEnabled(true)
+	case "talk_off":
+		err = prod.SetDuoTalkEnabled(false)
+	case "talk_header":
+		err = prod.SendDefaultDuoTalkHeader()
+	case "talk_play":
+		path := query.Get("file")
+		if path == "" {
+			path = filepath.Join("test_8k_mono.amr")
+		}
+		err = prod.PlayDuoTalkAMRFile(path)
+	default:
+		http.Error(w, fmt.Sprintf("unsupported action: %s", action), http.StatusBadRequest)
+		return
+	}
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	api.ResponseJSON(w, map[string]any{
+		"src":    src,
+		"action": action,
+		"status": "ok",
+	})
 }
 
 func apiDeviceList(w http.ResponseWriter, r *http.Request) {
@@ -191,6 +245,26 @@ func buildStreamURL(cam *wyze.Camera) string {
 	}
 
 	return fmt.Sprintf("wyze://%s?%s", cam.IP, query.Encode())
+}
+
+func getActiveGWellProducer(token string) (*wyze.GWellProducer, error) {
+	stream := streams.Get(token)
+	if stream == nil {
+		return nil, fmt.Errorf("wyze/gwell: stream not found: %s", token)
+	}
+	for _, producer := range stream.Producers() {
+		if producer == nil {
+			continue
+		}
+		conn := producer.Conn()
+		if conn == nil {
+			continue
+		}
+		if gwellProd, ok := conn.(*wyze.GWellProducer); ok {
+			return gwellProd, nil
+		}
+	}
+	return nil, fmt.Errorf("wyze/gwell: active gwell producer not found for stream: %s", token)
 }
 
 func isAuthError(err error, target **wyze.AuthError) bool {

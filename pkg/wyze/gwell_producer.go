@@ -60,6 +60,34 @@ func (p *GWellProducer) RawData() <-chan *gwelllib.DecodedPayload {
 	return p.client.RawData()
 }
 
+func (p *GWellProducer) SetDuoTalkEnabled(enabled bool) error {
+	if p == nil || p.client == nil {
+		return fmt.Errorf("wyze/gwell: client is nil")
+	}
+	return p.client.SetDuoTalkEnabled(enabled)
+}
+
+func (p *GWellProducer) SendDuoTalkHeader(packedHeader20 []byte) error {
+	if p == nil || p.client == nil {
+		return fmt.Errorf("wyze/gwell: client is nil")
+	}
+	return p.client.SendDuoTalkHeader(packedHeader20)
+}
+
+func (p *GWellProducer) SendDefaultDuoTalkHeader() error {
+	if p == nil || p.client == nil {
+		return fmt.Errorf("wyze/gwell: client is nil")
+	}
+	return p.client.SendDefaultDuoTalkHeader()
+}
+
+func (p *GWellProducer) SendDuoTalkAudioFrames(audioFrames [][]byte, audioPTS uint64) error {
+	if p == nil || p.client == nil {
+		return fmt.Errorf("wyze/gwell: client is nil")
+	}
+	return p.client.SendDuoTalkAudioFrames(audioFrames, audioPTS)
+}
+
 func NewGWellProducer(rawURL string) (*GWellProducer, error) {
 	client, err := DialGWell(rawURL)
 	if err != nil {
@@ -79,7 +107,7 @@ func NewGWellProducer(rawURL string) (*GWellProducer, error) {
 			Protocol:   client.Protocol(),
 			RemoteAddr: client.RemoteAddr().String(),
 			Source:     rawURL,
-			Medias:     medias,
+			Medias:     append(medias, &core.Media{Kind: core.KindAudio, Direction: core.DirectionSendonly, Codecs: []*core.Codec{{Name: core.CodecPCMU, ClockRate: 8000}, {Name: core.CodecPCMA, ClockRate: 8000}, {Name: core.CodecPCML, ClockRate: 8000}}}),
 			Transport:  client,
 		},
 		client: client,

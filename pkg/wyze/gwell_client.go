@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"sync"
 	"time"
 
 	gwelllib "github.com/wlatic/wyze-gwell-bridge/wyze-p2p/pkg/gwell"
@@ -18,6 +19,8 @@ type GWellClient struct {
 	host    string
 	mac     string
 	verbose bool
+	talkHeaderMu     sync.Mutex
+	talkHeaderPrimed bool
 }
 
 func DialGWell(rawURL string) (*GWellClient, error) {
@@ -122,6 +125,74 @@ func (c *GWellClient) SendUserData(payload []byte) error {
 	binary.LittleEndian.PutUint32(playerPayload[4:8], uint32(time.Now().UnixMilli()))
 	copy(playerPayload[8:], payload)
 	return c.session.SendUserData(playerPayload)
+}
+
+func (c *GWellClient) SendInnerUserData(cmd byte, payload []byte, expectResponse bool) error {
+	if c == nil || c.session == nil {
+		return fmt.Errorf("wyze/gwell: session is nil")
+	}
+	playerPayload := gwelllib.BuildPlayerUserDataHeader(0, cmd, 0, uint32(time.Now().UnixMilli()), payload)
+	return c.session.SendInnerUserData(playerPayload, expectResponse)
+}
+
+func (c *GWellClient) SetDuoTalkEnabled(enabled bool) error {
+	state := byte(0)
+	if enabled {
+		state = 1
+	}
+	return c.SendInnerUserData(0x32, []byte{state}, true)
+}
+
+func (c *GWellClient) SendDataPayload(payload []byte) error {
+	if c == nil || c.session == nil {
+		return fmt.Errorf("wyze/gwell: session is nil")
+	}
+	return c.session.SendDataPayload(payload)
+}
+
+func (c *GWellClient) SendDuoTalkHeader(packedHeader20 []byte) error {
+	payload, err := gwelllib.BuildGWELLAVHeaderPacket(0x02, packedHeader20)
+	if err != nil {
+		return fmt.Errorf("wyze/gwell: build talk header: %w", err)
+	}
+	return c.SendDataPayload(payload)
+}
+
+func (c *GWellClient) SendDefaultDuoTalkHeader() error {
+	header := gwelllib.BuildGWELLPackedAVHeader20(gwelllib.GWELLAVHeader{
+		AudioType:            5,
+		AudioCodecOption:     7,
+		AudioMode:            0,
+		AudioBitWidth:        1,
+		AudioSampleRate:      8000,
+		AudioSamplesPerFrame: 0x140,
+		VideoType:            0,
+		FrameRate:            15,
+		Width:                240,
+		Height:               320,
+	})
+	return c.SendDuoTalkHeader(header)
+}
+
+func (c *GWellClient) PrimeDuoTalkHeader() error {
+	c.talkHeaderMu.Lock()
+	defer c.talkHeaderMu.Unlock()
+	if c.talkHeaderPrimed {
+		return nil
+	}
+	if err := c.SendDefaultDuoTalkHeader(); err != nil {
+		return err
+	}
+	c.talkHeaderPrimed = true
+	return nil
+}
+
+func (c *GWellClient) SendDuoTalkAudioFrames(audioFrames [][]byte, audioPTS uint64) error {
+	if len(audioFrames) == 0 {
+		return fmt.Errorf("wyze/gwell: no audio frames")
+	}
+	payload := gwelllib.BuildGWELLAVAudioPacket(0x02, audioFrames, nil, 0, audioPTS)
+	return c.SendDataPayload(payload)
 }
 
 func (c *GWellClient) SendUserDataJSON(v any) error {
