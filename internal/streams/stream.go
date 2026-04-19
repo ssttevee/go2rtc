@@ -128,3 +128,9 @@ func (s *Stream) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(info)
 }
+
+func (s *Stream) Producers() []*Producer {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*Producer(nil), s.producers...)
+}

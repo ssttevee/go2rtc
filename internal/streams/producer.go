@@ -139,6 +139,12 @@ func (p *Producer) MarshalJSON() ([]byte, error) {
 	return json.Marshal(info)
 }
 
+func (p *Producer) Conn() core.Producer {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.conn
+}
+
 // internals
 
 func (p *Producer) start() {

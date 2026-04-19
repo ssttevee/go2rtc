@@ -1,6 +1,7 @@
 package onvif
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/AlexxIT/go2rtc/internal/streams"
 	"github.com/AlexxIT/go2rtc/pkg/core"
 	"github.com/AlexxIT/go2rtc/pkg/onvif"
+	"github.com/AlexxIT/go2rtc/pkg/wyze"
 	"github.com/rs/zerolog"
 )
 
@@ -163,6 +165,61 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 		uri := "http://" + r.Host + "/api/frame.jpeg?src=" + onvif.FindTagValue(b, "ProfileToken")
 		b = onvif.GetSnapshotUriResponse(uri)
 
+	case onvif.PTZGetConfigurations:
+		b = onvif.GetPTZConfigurationsResponse(streams.GetAllNames())
+
+	case onvif.PTZGetConfiguration:
+		token := onvif.FindTagValue(b, "PTZConfigurationToken")
+		if strings.HasPrefix(token, "ptz_") {
+			token = strings.TrimPrefix(token, "ptz_")
+		}
+		b = onvif.GetPTZConfigurationResponse(token)
+
+	case onvif.PTZGetNodes:
+		b = onvif.GetPTZNodesResponse()
+
+	case onvif.PTZGetStatus:
+		token := onvif.FindTagValue(b, "ProfileToken")
+		log.Info().Str("token", token).Msg("[onvif] PTZ GetStatus")
+		status, err := getPTZStatus(token)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		b = onvif.GetPTZStatusResponse(status.Pan, status.Tilt)
+
+	case onvif.PTZRelativeMove:
+		token := onvif.FindTagValue(b, "ProfileToken")
+		pan := parseFloatTag(b, "PanTilt.+?x")
+		tilt := parseFloatTag(b, "PanTilt.+?y")
+		log.Info().Str("token", token).Float32("pan", pan).Float32("tilt", tilt).Msg("[onvif] PTZ RelativeMove")
+		if err := relativeMove(token, pan, tilt); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		b = onvif.RelativeMoveResponse()
+
+	case onvif.PTZContinuousMove:
+		token := onvif.FindTagValue(b, "ProfileToken")
+		pan := parseFloatTag(b, "PanTilt.+?x")
+		tilt := parseFloatTag(b, "PanTilt.+?y")
+		timeout := parsePTZTimeout(onvif.FindTagValue(b, "Timeout"))
+		log.Info().Str("token", token).Float32("pan", pan).Float32("tilt", tilt).Dur("timeout", timeout).Msg("[onvif] PTZ ContinuousMove")
+		if err := continuousMove(token, pan, tilt, timeout); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		b = onvif.ContinuousMoveResponse()
+
+	case onvif.PTZStop:
+		token := onvif.FindTagValue(b, "ProfileToken")
+		log.Info().Str("token", token).Msg("[onvif] PTZ Stop")
+		if err := stopPTZ(token); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		b = onvif.StopResponse()
+
 	default:
 		http.Error(w, "unsupported operation", http.StatusBadRequest)
 		log.Warn().Msgf("[onvif] unsupported operation: %s", operation)
@@ -176,6 +233,82 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 	if _, err = w.Write(b); err != nil {
 		log.Error().Err(err).Caller().Send()
 	}
+}
+
+func getPTZStatus(token string) (*wyze.DuoPTZStatus, error) {
+	prod, err := getActiveGWellProducer(token)
+	if err != nil {
+		return nil, err
+	}
+	return prod.GetPTZStatus(5 * time.Second)
+}
+
+func continuousMove(token string, pan, tilt float32, timeout time.Duration) error {
+	prod, err := getActiveGWellProducer(token)
+	if err != nil {
+		return err
+	}
+	return prod.StartPTZ(pan, tilt, timeout)
+}
+
+func relativeMove(token string, pan, tilt float32) error {
+	prod, err := getActiveGWellProducer(token)
+	if err != nil {
+		return err
+	}
+	return prod.TapPTZ(pan, tilt)
+}
+
+func stopPTZ(token string) error {
+	prod, err := getActiveGWellProducer(token)
+	if err != nil {
+		return err
+	}
+	return prod.StopPTZ()
+}
+
+func parseFloatTag(body []byte, tag string) float32 {
+	v, err := strconv.ParseFloat(onvif.FindXMLAttr(body, tag), 32)
+	if err != nil {
+		return 0
+	}
+	return float32(v)
+}
+
+func parsePTZTimeout(value string) time.Duration {
+	if value == "" {
+		return time.Second
+	}
+	if strings.HasPrefix(value, "PT") && strings.HasSuffix(value, "S") {
+		seconds, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimPrefix(value, "PT"), "S"), 64)
+		if err == nil {
+			return time.Duration(seconds * float64(time.Second))
+		}
+	}
+	if d, err := time.ParseDuration(value); err == nil {
+		return d
+	}
+	return time.Second
+}
+
+func getActiveGWellProducer(token string) (*wyze.GWellProducer, error) {
+	stream := streams.Get(token)
+	if stream == nil {
+		return nil, fmt.Errorf("onvif/ptz: stream not found: %s", token)
+	}
+	for _, producer := range stream.Producers() {
+		if producer == nil {
+			continue
+		}
+		conn := producer.Conn()
+		if conn == nil {
+			continue
+		}
+		if gwellProd, ok := conn.(*wyze.GWellProducer); ok {
+			return gwellProd, nil
+		}
+	}
+	return nil, fmt.Errorf("onvif/ptz: active gwell producer not found for stream: %s", token)
 }
 
 func apiOnvif(w http.ResponseWriter, r *http.Request) {

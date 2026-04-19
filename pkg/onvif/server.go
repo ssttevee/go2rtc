@@ -41,6 +41,16 @@ const (
 	MediaGetVideoSourceConfigurations        = "GetVideoSourceConfigurations"
 )
 
+const (
+	PTZGetConfigurations = "GetConfigurations"
+	PTZGetConfiguration  = "GetConfiguration"
+	PTZGetNodes          = "GetNodes"
+	PTZGetStatus         = "GetStatus"
+	PTZRelativeMove      = "RelativeMove"
+	PTZContinuousMove    = "ContinuousMove"
+	PTZStop              = "Stop"
+)
+
 func GetRequestAction(b []byte) string {
 	// <soap-env:Body><ns0:GetCapabilities xmlns:ns0="http://www.onvif.org/ver10/device/wsdl">
 	// <v:Body><GetSystemDateAndTime xmlns="http://www.onvif.org/ver10/device/wsdl" /></v:Body>
@@ -70,8 +80,11 @@ func GetCapabilitiesResponse(host string) []byte {
 				<tt:RTP_RTSP_TCP>true</tt:RTP_RTSP_TCP>
 			</tt:StreamingCapabilities>
 		</tt:Media>
+		<tt:PTZ>
+			<tt:XAddr>http://%s/onvif/ptz_service</tt:XAddr>
+		</tt:PTZ>
 	</tds:Capabilities>
-</tds:GetCapabilitiesResponse>`, host, host)
+</tds:GetCapabilitiesResponse>`, host, host, host)
 	return e.Bytes()
 }
 
@@ -88,7 +101,12 @@ func GetServicesResponse(host string) []byte {
 		<tds:XAddr>http://%s/onvif/media_service</tds:XAddr>
 		<tds:Version><tt:Major>2</tt:Major><tt:Minor>5</tt:Minor></tds:Version>
 	</tds:Service>
-</tds:GetServicesResponse>`, host, host)
+	<tds:Service>
+		<tds:Namespace>http://www.onvif.org/ver20/ptz/wsdl</tds:Namespace>
+		<tds:XAddr>http://%s/onvif/ptz_service</tds:XAddr>
+		<tds:Version><tt:Major>2</tt:Major><tt:Minor>5</tt:Minor></tds:Version>
+	</tds:Service>
+</tds:GetServicesResponse>`, host, host, host)
 	return e.Bytes()
 }
 
@@ -157,7 +175,23 @@ func appendProfile(e *Envelope, tag, name string) {
 	e.Appendf(`<tt:Name>%s</tt:Name>`, name)
 	appendVideoSourceConfiguration(e, "VideoSourceConfiguration", name)
 	appendVideoEncoderConfiguration(e, "VideoEncoderConfiguration")
+	appendPTZConfiguration(e, "PTZConfiguration", name)
 	e.Appendf(`</trt:%s>`, tag)
+}
+
+func appendPTZConfiguration(e *Envelope, tag, name string) {
+	e.Appendf(`<tt:%s token="ptz_%s" fixed="true">
+	<tt:Name>PTZ</tt:Name>
+	<tt:NodeToken>ptz_node</tt:NodeToken>
+	<tt:DefaultAbsolutePantTiltPositionSpace>http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace</tt:DefaultAbsolutePantTiltPositionSpace>
+	<tt:DefaultRelativePanTiltTranslationSpace>http://www.onvif.org/ver10/tptz/PanTiltSpaces/TranslationGenericSpace</tt:DefaultRelativePanTiltTranslationSpace>
+	<tt:DefaultContinuousPanTiltVelocitySpace>http://www.onvif.org/ver10/tptz/PanTiltSpaces/VelocityGenericSpace</tt:DefaultContinuousPanTiltVelocitySpace>
+	<tt:DefaultPTZSpeed><tt:PanTilt x="1.0" y="1.0"/></tt:DefaultPTZSpeed>
+	<tt:DefaultPTZTimeout>PT1S</tt:DefaultPTZTimeout>
+	<tt:PanTiltLimits>
+		<tt:Range><tt:URI>http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace</tt:URI><tt:XRange><tt:Min>0</tt:Min><tt:Max>255</tt:Max></tt:XRange><tt:YRange><tt:Min>0</tt:Min><tt:Max>255</tt:Max></tt:YRange></tt:Range>
+	</tt:PanTiltLimits>
+</tt:%s>`, tag, name, tag)
 }
 
 func GetVideoSourcesResponse(names []string) []byte {
@@ -240,6 +274,73 @@ func GetStreamUriResponse(uri string) []byte {
 func GetSnapshotUriResponse(uri string) []byte {
 	e := NewEnvelope()
 	e.Appendf(`<trt:GetSnapshotUriResponse><trt:MediaUri><tt:Uri>%s</tt:Uri></trt:MediaUri></trt:GetSnapshotUriResponse>`, uri)
+	return e.Bytes()
+}
+
+func GetPTZConfigurationsResponse(names []string) []byte {
+	e := NewEnvelope()
+	e.Append(`<tptz:GetConfigurationsResponse>`)
+	for _, name := range names {
+		appendPTZConfiguration(e, "PTZConfiguration", name)
+	}
+	e.Append(`</tptz:GetConfigurationsResponse>`)
+	return e.Bytes()
+}
+
+func GetPTZConfigurationResponse(name string) []byte {
+	e := NewEnvelope()
+	e.Append(`<tptz:GetConfigurationResponse>`)
+	appendPTZConfiguration(e, "PTZConfiguration", name)
+	e.Append(`</tptz:GetConfigurationResponse>`)
+	return e.Bytes()
+}
+
+func GetPTZNodesResponse() []byte {
+	e := NewEnvelope()
+	e.Append(`<tptz:GetNodesResponse>
+	<tptz:PTZNode token="ptz_node">
+		<tt:Name>go2rtc PTZ Node</tt:Name>
+		<tt:SupportedPTZSpaces>
+			<tt:AbsolutePanTiltPositionSpace><tt:URI>http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace</tt:URI><tt:XRange><tt:Min>0</tt:Min><tt:Max>255</tt:Max></tt:XRange><tt:YRange><tt:Min>0</tt:Min><tt:Max>255</tt:Max></tt:YRange></tt:AbsolutePanTiltPositionSpace>
+			<tt:ContinuousPanTiltVelocitySpace><tt:URI>http://www.onvif.org/ver10/tptz/PanTiltSpaces/VelocityGenericSpace</tt:URI><tt:XRange><tt:Min>-1</tt:Min><tt:Max>1</tt:Max></tt:XRange><tt:YRange><tt:Min>-1</tt:Min><tt:Max>1</tt:Max></tt:YRange></tt:ContinuousPanTiltVelocitySpace>
+		</tt:SupportedPTZSpaces>
+		<tt:MaximumNumberOfPresets>0</tt:MaximumNumberOfPresets>
+		<tt:HomeSupported>false</tt:HomeSupported>
+	</tptz:PTZNode>
+</tptz:GetNodesResponse>`)
+	return e.Bytes()
+}
+
+func GetPTZStatusResponse(pan, tilt float32) []byte {
+	e := NewEnvelope()
+	e.Appendf(`<tptz:GetStatusResponse>
+	<tptz:PTZStatus>
+		<tt:Position>
+			<tt:PanTilt x="%.3f" y="%.3f" space="http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace"/>
+		</tt:Position>
+		<tt:MoveStatus><tt:PanTilt>IDLE</tt:PanTilt></tt:MoveStatus>
+		<tt:Error>OK</tt:Error>
+		<tt:UtcTime>%s</tt:UtcTime>
+	</tptz:PTZStatus>
+</tptz:GetStatusResponse>`, pan, tilt, time.Now().UTC().Format(time.RFC3339))
+	return e.Bytes()
+}
+
+func ContinuousMoveResponse() []byte {
+	e := NewEnvelope()
+	e.Append(`<tptz:ContinuousMoveResponse/>`)
+	return e.Bytes()
+}
+
+func RelativeMoveResponse() []byte {
+	e := NewEnvelope()
+	e.Append(`<tptz:RelativeMoveResponse/>`)
+	return e.Bytes()
+}
+
+func StopResponse() []byte {
+	e := NewEnvelope()
+	e.Append(`<tptz:StopResponse/>`)
 	return e.Bytes()
 }
 

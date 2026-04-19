@@ -19,7 +19,16 @@ type DiscoveryDevice struct {
 }
 
 func FindTagValue(b []byte, tag string) string {
-	re := regexp.MustCompile(`(?s)<(?:\w+:)?` + tag + `\b[^>]*>([^<]+)`)
+	re := regexp.MustCompile(`(?s)<(?:\w+:)?` + tag + `\b[^>]*>([^<]+)`) 
+	m := re.FindSubmatch(b)
+	if len(m) != 2 {
+		return ""
+	}
+	return string(m[1])
+}
+
+func FindXMLAttr(b []byte, path string) string {
+	re := regexp.MustCompile(`(?s)<(?:\w+:)?` + path + `="([^"]+)"`)
 	m := re.FindSubmatch(b)
 	if len(m) != 2 {
 		return ""

@@ -1,6 +1,8 @@
 package wyze
 
 import (
+	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -107,6 +109,95 @@ func (c *GWellClient) SetDeadline(t time.Time) error {
 
 func (c *GWellClient) Protocol() string {
 	return "wyze/gwell"
+}
+
+func (c *GWellClient) SendUserData(payload []byte) error {
+	if c == nil || c.session == nil {
+		return fmt.Errorf("wyze/gwell: session is nil")
+	}
+	playerPayload := make([]byte, 8+len(payload))
+	playerPayload[0] = 1
+	playerPayload[1] = 0
+	playerPayload[2] = 0
+	binary.LittleEndian.PutUint32(playerPayload[4:8], uint32(time.Now().UnixMilli()))
+	copy(playerPayload[8:], payload)
+	return c.session.SendUserData(playerPayload)
+}
+
+func (c *GWellClient) SendUserDataJSON(v any) error {
+	payload, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("wyze/gwell: marshal user data json: %w", err)
+	}
+	return c.SendUserData(payload)
+}
+
+func (c *GWellClient) SendDuoPTZ(angle float32) error {
+	return c.SendUserDataJSON(map[string]any{
+		"cmd":   8,
+		"angle": angle,
+	})
+}
+
+func (c *GWellClient) HoldDuoPTZ(angle float32, hold time.Duration) error {
+	if err := c.SendDuoPTZ(angle); err != nil {
+		return err
+	}
+	if hold <= 0 {
+		return nil
+	}
+
+	const resendInterval = 200 * time.Millisecond
+	deadline := time.Now().Add(hold)
+	ticker := time.NewTicker(resendInterval)
+	defer ticker.Stop()
+
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return c.StopDuoPTZ()
+		}
+
+		wait := remaining
+		if wait > resendInterval {
+			wait = resendInterval
+		}
+
+		select {
+		case <-ticker.C:
+			if time.Now().Before(deadline) {
+				if err := c.SendDuoPTZ(angle); err != nil {
+					return err
+				}
+			}
+		case <-time.After(wait):
+			if time.Now().After(deadline) || time.Now().Equal(deadline) {
+				return c.StopDuoPTZ()
+			}
+		}
+	}
+}
+
+func (c *GWellClient) SendDuoPTZOnce(angle float32) error {
+	return c.SendUserDataJSON(map[string]any{
+		"cmd":   8,
+		"angle": angle,
+		"once":  1,
+	})
+}
+
+func (c *GWellClient) StopDuoPTZ() error {
+	return c.SendUserDataJSON(map[string]any{
+		"cmd":  8,
+		"stop": 1,
+	})
+}
+
+func (c *GWellClient) GetDuoPTZLocation() error {
+	return c.SendUserDataJSON(map[string]any{
+		"cmd": 9,
+		"op":  "get",
+	})
 }
 
 func (c *GWellClient) RemoteAddr() net.Addr {
