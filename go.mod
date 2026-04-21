@@ -3,7 +3,6 @@ module github.com/AlexxIT/go2rtc
 go 1.24.0
 
 require (
-	github.com/asticode/go-astits v1.14.0
 	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/expr-lang/expr v1.17.7
 	github.com/google/uuid v1.6.0
@@ -24,13 +23,13 @@ require (
 	github.com/sigurn/crc8 v0.0.0-20220107193325-2243fe600f9f
 	github.com/stretchr/testify v1.11.1
 	github.com/tadglines/go-pkgs v0.0.0-20210623144937-b983b20f54f9
+	github.com/wlatic/wyze-gwell-bridge/wyze-p2p v0.0.0
 	golang.org/x/crypto v0.47.0
 	golang.org/x/net v0.49.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	github.com/asticode/go-astikit v0.57.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
@@ -39,7 +38,6 @@ require (
 	github.com/pion/mdns/v2 v2.1.0 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/sctp v1.9.2 // indirect
-	github.com/pion/transport/v3 v3.1.1 // indirect
 	github.com/pion/transport/v4 v4.0.1 // indirect
 	github.com/pion/turn/v4 v4.1.4 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
@@ -50,3 +48,5 @@ require (
 	golang.org/x/time v0.14.0 // indirect
 	golang.org/x/tools v0.41.0 // indirect
 )
+
+replace github.com/wlatic/wyze-gwell-bridge/wyze-p2p => github.com/ssttevee/hacky-wyze-gwell/wyze-p2p v0.0.0-20260418163559-7bd66f860a34
