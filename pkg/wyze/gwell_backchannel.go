@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -42,24 +41,11 @@ func (p *GWellProducer) AddTrack(media *core.Media, codec *core.Codec, track *co
 	if err = cmd.Start(); err != nil {
 		return err
 	}
-	fmt.Printf("[wyze/gwell] backchannel ffmpeg start: codec=%s cmd=%s\n", track.Codec.String(), cmd.String())
 
 	go func() {
 		defer cmd.Close()
 		defer stdin.Close()
-		debugPath := "/tmp/gwell_backchannel_live.amr"
-		debugOut, debugErr := os.Create(debugPath)
-		if debugErr != nil {
-			fmt.Printf("[wyze/gwell] backchannel debug create failed: %v\n", debugErr)
-		}
-		var amrReader io.Reader = stdout
-		if debugOut != nil {
-			defer debugOut.Close()
-			amrReader = io.TeeReader(stdout, debugOut)
-			fmt.Printf("[wyze/gwell] backchannel debug tee: %s\n", debugPath)
-		}
-
-		if err := p.client.PlayDuoTalkAMR(amrReader); err != nil {
+		if err := p.client.PlayDuoTalkAMR(stdout); err != nil {
 			if stderr.Len() > 0 {
 				fmt.Printf("[wyze/gwell] backchannel talk failed: %v stderr=%s\n", err, strings.TrimSpace(stderr.String()))
 			} else {
@@ -76,16 +62,11 @@ func (p *GWellProducer) AddTrack(media *core.Media, codec *core.Codec, track *co
 	}()
 
 	sender := core.NewSender(media, track.Codec)
-	var packetCount int
 	sender.Handler = func(pkt *rtp.Packet) {
-		packetCount++
-		if packetCount <= 3 || packetCount%100 == 0 {
-			fmt.Printf("[wyze/gwell] backchannel input packet %d: payload=%d bytes ts=%d\n", packetCount, len(pkt.Payload), pkt.Timestamp)
-		}
 		if n, err := stdin.Write(pkt.Payload); err == nil {
 			p.Send += n
 		} else {
-			fmt.Printf("[wyze/gwell] backchannel stdin write failed after %d packets: %v\n", packetCount, err)
+			fmt.Printf("[wyze/gwell] backchannel stdin write failed: %v\n", err)
 		}
 	}
 	sender.HandleRTP(track)
@@ -171,14 +152,12 @@ startTalk:
 		return err
 	}
 	time.Sleep(40 * time.Millisecond)
-	fmt.Printf("[wyze/gwell] talk_on\n")
 	if err := c.SetDuoTalkEnabled(true); err != nil {
 		return err
 	}
 	defer func() { _ = c.SetDuoTalkEnabled(false) }()
 	time.Sleep(100 * time.Millisecond)
 
-	fmt.Printf("[wyze/gwell] talk_header\n")
 	if err := c.SendDefaultDuoTalkHeader(); err != nil {
 		return err
 	}
@@ -192,9 +171,6 @@ startTalk:
 	var frameCount int
 	sendBatch := func(batch [][]byte) error {
 		frameCount += len(batch)
-		if frameCount <= 3 || frameCount%100 == 0 {
-			fmt.Printf("[wyze/gwell] AMR batch: frames=%d last_count=%d pts=%d\n", len(batch), frameCount, audioPTS)
-		}
 		if err := c.SendDuoTalkAudioFrames(batch, audioPTS); err != nil {
 			return err
 		}
@@ -237,6 +213,5 @@ startTalk:
 	if frameCount == 0 {
 		return fmt.Errorf("wyze/gwell: no AMR frames produced")
 	}
-	fmt.Printf("[wyze/gwell] backchannel sent %d AMR frames\n", frameCount)
 	return nil
 }
