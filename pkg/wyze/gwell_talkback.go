@@ -39,7 +39,7 @@ func (c *GWellClient) PlayDuoTalkAMRFile(path string) error {
 	time.Sleep(40 * time.Millisecond)
 
 	const (
-		frameStep       = 120 * time.Millisecond
+		frameStep = 120 * time.Millisecond
 	)
 	startPTS := time.Now()
 	for i := 0; i < len(frames); i += 6 {

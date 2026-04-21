@@ -185,7 +185,7 @@ startTalk:
 	time.Sleep(40 * time.Millisecond)
 
 	const (
-		batchStep       = 60 * time.Millisecond
+		batchStep      = 60 * time.Millisecond
 		audioPTSStepNB = 160
 	)
 	var audioPTS uint64

@@ -195,6 +195,49 @@ func (c *GWellClient) SendDuoTalkAudioFrames(audioFrames [][]byte, audioPTS uint
 	return c.SendDataPayload(payload)
 }
 
+func (c *GWellClient) SendObservedDuoAACHeader() error {
+	packed := []byte{
+		0x04, 0x02, 0x00, 0x01,
+		0x80, 0x3e, 0x00, 0x00,
+		0x00, 0x04, 0x01, 0x14,
+		0x00, 0x09, 0x00, 0x00,
+		0x20, 0x0a, 0x00, 0x00,
+	}
+	payload, err := gwelllib.BuildGWELLAVHeaderPacket(0x08, packed)
+	if err != nil {
+		return fmt.Errorf("wyze/gwell: build observed aac talk header: %w", err)
+	}
+	return c.SendDataPayload(payload)
+}
+
+func (c *GWellClient) SendObservedDuoAACFrame(frame []byte, audioPTS uint64) error {
+	if len(frame) == 0 {
+		return fmt.Errorf("wyze/gwell: empty aac frame")
+	}
+	payload := gwelllib.BuildGWELLAVAudioPacket(0x08, [][]byte{frame}, nil, 0, audioPTS)
+	return c.SendDataPayload(payload)
+}
+
+func (c *GWellClient) SendDuoTalkAudioFramesSplit(audioFrames [][]byte, audioPTS uint64) error {
+	if len(audioFrames) == 0 {
+		return fmt.Errorf("wyze/gwell: no audio frames")
+	}
+	header := gwelllib.BuildGWELLAVAudioPacketHeader(0x02, len(audioFrames), 0, 0, audioPTS)
+	lengths := gwelllib.BuildGWELLAVAudioLengthTable(audioFrames)
+	if err := c.SendDataPayload(header); err != nil {
+		return err
+	}
+	if err := c.SendDataPayload(lengths); err != nil {
+		return err
+	}
+	for _, frame := range audioFrames {
+		if err := c.SendDataPayload(frame); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *GWellClient) SendUserDataJSON(v any) error {
 	payload, err := json.Marshal(v)
 	if err != nil {
