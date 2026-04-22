@@ -1,13 +1,19 @@
 package wyze
 
 import (
+	"crypto/hmac"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"os/exec"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,8 +23,13 @@ import (
 const (
 	baseURLAuth = "https://auth-prod.api.wyze.com"
 	baseURLAPI  = "https://api.wyzecam.com"
+	baseURLMars = "https://wyze-mars-service.wyzecam.com"
 	appName     = "com.hualai.WyzeCam"
 	appVersion  = "2.50.0"
+	gwellPrefix = "GW_"
+	wpkAppID    = "9319141212m2ik"
+	wpkAppVer   = "2.19.14"
+	wpkSalt     = "wyze_app_secret_key_132"
 )
 
 type Cloud struct {
@@ -75,6 +86,12 @@ type p2pInfoResponse struct {
 	Data map[string]any `json:"data"`
 }
 
+type deviceInfoResponse struct {
+	Code string         `json:"code"`
+	Msg  string         `json:"msg"`
+	Data map[string]any `json:"data"`
+}
+
 type loginResponse struct {
 	AccessToken    string   `json:"access_token"`
 	RefreshToken   string   `json:"refresh_token"`
@@ -82,6 +99,18 @@ type loginResponse struct {
 	MFAOptions     []string `json:"mfa_options"`
 	SMSSessionID   string   `json:"sms_session_id"`
 	EmailSessionID string   `json:"email_session_id"`
+}
+
+type marsTokenResponse struct {
+	Code    any            `json:"code"`
+	Msg     string         `json:"msg"`
+	Message string         `json:"message"`
+	Data    map[string]any `json:"data"`
+}
+
+type GWellAccessCredential struct {
+	AccessID    string
+	AccessToken string
 }
 
 func NewCloud(apiKey, keyID string) *Cloud {
@@ -196,10 +225,6 @@ func (c *Cloud) GetCameraList() ([]*Camera, error) {
 		if dev.ProductType != "Camera" {
 			continue
 		}
-		if dev.DeviceParams.IP == "" {
-			continue // skip cameras without IP (gwell protocol)
-		}
-
 		c.cameras = append(c.cameras, &Camera{
 			MAC:          dev.MAC,
 			P2PID:        dev.DeviceParams.P2PID,
@@ -279,6 +304,144 @@ func (c *Cloud) GetP2PInfo(mac string) (map[string]any, error) {
 	return result.Data, nil
 }
 
+func (c *Cloud) GetDeviceInfo(mac, model string) (map[string]any, error) {
+	payload := map[string]any{
+		"access_token":      c.accessToken,
+		"phone_id":          c.phoneID,
+		"device_mac":        mac,
+		"device_model":      model,
+		"app_name":          appName,
+		"app_ver":           appName + "___" + appVersion,
+		"app_version":       appVersion,
+		"phone_system_type": 1,
+		"sc":                "a626948714654991afd3c0dbd7cdb901",
+		"sv":                "c7c9ed9d307c4cbbaf7d6f95b2b4f2e9",
+		"ts":                time.Now().UnixMilli(),
+	}
+
+	jsonData, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest("POST", baseURLAPI+"/app/v2/device/get_device_Info", strings.NewReader(string(jsonData)))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result deviceInfoResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("wyze: failed to parse device info: %w", err)
+	}
+	if result.Code != "1" {
+		return nil, fmt.Errorf("wyze: API error: %s - %s", result.Code, result.Msg)
+	}
+
+	return result.Data, nil
+}
+
+func (c *Cloud) GetGWellAccessCredential(mac string) (*GWellAccessCredential, error) {
+	nonce := time.Now().UnixMilli()
+	payload := map[string]any{
+		"ttl_minutes": 10080,
+		"nonce":       fmt.Sprintf("%d", nonce),
+		"unique_id":   c.phoneID,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", baseURLMars+"/plugin/mars/v2/regist_gw_user/"+url.PathEscape(mac), strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set("Content-Type", "application/json;charset=utf-8")
+	req.Header.Set("User-Agent", "wyze_android_"+wpkAppVer)
+	req.Header.Set("access_token", c.accessToken)
+	req.Header.Set("requestid", requestID(nonce))
+	req.Header.Set("appid", wpkAppID)
+	req.Header.Set("appinfo", "wyze_android_"+wpkAppVer)
+	req.Header.Set("phoneid", c.phoneID)
+	req.Header.Set("signature2", dynamicSignature(c.accessToken, wpkSalt, body))
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result marsTokenResponse
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("wyze: failed to parse Mars response: %w", err)
+	}
+
+	accessID, _ := result.Data["accessId"].(string)
+	accessToken, _ := result.Data["accessToken"].(string)
+	if accessID == "" || accessToken == "" {
+		msg := result.Msg
+		if msg == "" {
+			msg = result.Message
+		}
+		return nil, fmt.Errorf("wyze: missing GWell access credentials (code=%v msg=%s keys=%v)", result.Code, msg, sortedKeys(result.Data))
+	}
+
+	return &GWellAccessCredential{AccessID: accessID, AccessToken: accessToken}, nil
+}
+
+func IsGWellCamera(cam *Camera) bool {
+	if cam == nil {
+		return false
+	}
+	if strings.HasPrefix(strings.ToUpper(cam.MAC), gwellPrefix) {
+		return true
+	}
+	return cam.IP == "" && cam.DTLS == 0
+}
+
+func ResolveLANIP(deviceID string) string {
+	mac := macFromDeviceID(deviceID)
+	if mac == "" {
+		return ""
+	}
+
+	out, err := exec.Command("arp", "-a").Output()
+	if err != nil {
+		return ""
+	}
+
+	needle := normalizeMAC(mac)
+	for _, line := range strings.Split(string(out), "\n") {
+		ip, seenMAC := parseARPLine(line)
+		if ip == "" || seenMAC == "" {
+			continue
+		}
+		if normalizeMAC(seenMAC) != needle {
+			continue
+		}
+		if parsed := net.ParseIP(ip); parsed != nil {
+			return parsed.String()
+		}
+	}
+
+	return ""
+}
+
 type apiError struct {
 	Code        string `json:"code"`
 	ErrorCode   int    `json:"errorCode"`
@@ -334,4 +497,70 @@ func hashPassword(password string) string {
 		encoded = hex.EncodeToString(hash[:])
 	}
 	return encoded
+}
+
+func requestID(nonce int64) string {
+	first := md5Hex(fmt.Sprintf("%d", nonce))
+	return md5Hex(first)
+}
+
+func dynamicSignature(accessToken, salt string, body []byte) string {
+	secret := md5Hex(accessToken + salt)
+	h := hmac.New(md5.New, []byte(secret))
+	h.Write(body)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func md5Hex(s string) string {
+	sum := md5.Sum([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+func sortedKeys(m map[string]any) []string {
+	if m == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func macFromDeviceID(deviceID string) string {
+	parts := strings.Split(deviceID, "_")
+	if len(parts) == 0 {
+		return ""
+	}
+	raw := parts[len(parts)-1]
+	if len(raw) != 12 {
+		return ""
+	}
+	for _, ch := range raw {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", ch) {
+			return ""
+		}
+	}
+	return raw
+}
+
+var arpLine = regexp.MustCompile(`\(([^)]+)\) at ([0-9a-fA-F:]+) `)
+
+func parseARPLine(line string) (ip string, mac string) {
+	m := arpLine.FindStringSubmatch(line)
+	if len(m) != 3 {
+		return "", ""
+	}
+	return m[1], m[2]
+}
+
+func normalizeMAC(s string) string {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(s)), ":")
+	for i, part := range parts {
+		if len(part) == 1 {
+			parts[i] = "0" + part
+		}
+	}
+	return strings.Join(parts, "")
 }

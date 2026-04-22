@@ -93,10 +93,14 @@ func apiDeviceList(w http.ResponseWriter, r *http.Request) {
 
 		var items []*api.Source
 		for _, cam := range cameras {
+			streamURL, err := buildStreamURL(cloud, email, cam)
+			if err != nil {
+				return err
+			}
 			items = append(items, &api.Source{
 				Name: cam.Nickname,
 				Info: fmt.Sprintf("%s | %s | %s", cam.ProductModel, cam.MAC, cam.IP),
-				URL:  buildStreamURL(cam),
+				URL:  streamURL,
 			})
 		}
 
@@ -169,17 +173,51 @@ func apiAuth(w http.ResponseWriter, r *http.Request) {
 
 	var items []*api.Source
 	for _, cam := range cameras {
+		streamURL, err := buildStreamURL(cloud, email, cam)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		items = append(items, &api.Source{
 			Name: cam.Nickname,
 			Info: fmt.Sprintf("%s | %s | %s", cam.ProductModel, cam.MAC, cam.IP),
-			URL:  buildStreamURL(cam),
+			URL:  streamURL,
 		})
 	}
 
 	api.ResponseSources(w, items)
 }
 
-func buildStreamURL(cam *wyze.Camera) string {
+func buildStreamURL(cloud *wyze.Cloud, account string, cam *wyze.Camera) (string, error) {
+	if wyze.IsGWellCamera(cam) {
+		cred, err := cloud.GetGWellAccessCredential(cam.MAC)
+		if err != nil {
+			return "", err
+		}
+
+		host := cam.IP
+		if info, err := cloud.GetDeviceInfo(cam.MAC, cam.ProductModel); err == nil {
+			if ip, _ := info["ip"].(string); ip != "" {
+				host = ip
+			}
+		}
+		if host == "" {
+			host = wyze.ResolveLANIP(cam.MAC)
+		}
+		if host == "" {
+			host = cam.MAC
+		}
+
+		query := url.Values{}
+		query.Set("proto", "gwell")
+		query.Set("account", account)
+		query.Set("mac", cam.MAC)
+		query.Set("model", cam.ProductModel)
+		query.Set("access_id", cred.AccessID)
+		query.Set("access_token", cred.AccessToken)
+		return fmt.Sprintf("wyze://%s?%s", host, query.Encode()), nil
+	}
+
 	query := url.Values{}
 	query.Set("uid", cam.P2PID)
 	query.Set("enr", cam.ENR)
@@ -190,7 +228,7 @@ func buildStreamURL(cam *wyze.Camera) string {
 		query.Set("dtls", "true")
 	}
 
-	return fmt.Sprintf("wyze://%s?%s", cam.IP, query.Encode())
+	return fmt.Sprintf("wyze://%s?%s", cam.IP, query.Encode()), nil
 }
 
 func isAuthError(err error, target **wyze.AuthError) bool {
