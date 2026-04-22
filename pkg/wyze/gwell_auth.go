@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	gwelllib "github.com/wlatic/wyze-gwell-bridge/wyze-p2p/pkg/gwell"
 )
 
 const gwellCredentialRefreshAge = 6 * 24 * time.Hour
@@ -23,6 +25,12 @@ type GWellCredentialCache struct {
 	AccessID    string    `json:"access_id"`
 	AccessToken string    `json:"access_token"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type GWellSessionCache struct {
+	ServerAddr string                `json:"server_addr"`
+	Devices    []gwelllib.DeviceInfo `json:"devices"`
+	UpdatedAt  time.Time             `json:"updated_at"`
 }
 
 var gwellAccountProvider struct {
@@ -123,7 +131,7 @@ func gwellCredentialNeedsRefresh(cache *GWellCredentialCache) bool {
 }
 
 func loadGWellCredentialCache(account, mac string) (*GWellCredentialCache, error) {
-	path, err := gwellCredentialCachePath(account, mac)
+	path, err := gwellCachePath(account, mac, "credentials.json")
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +147,7 @@ func loadGWellCredentialCache(account, mac string) (*GWellCredentialCache, error
 }
 
 func saveGWellCredentialCache(account, mac string, cache *GWellCredentialCache) error {
-	path, err := gwellCredentialCachePath(account, mac)
+	path, err := gwellCachePath(account, mac, "credentials.json")
 	if err != nil {
 		return err
 	}
@@ -156,12 +164,61 @@ func saveGWellCredentialCache(account, mac string, cache *GWellCredentialCache) 
 	return nil
 }
 
-func gwellCredentialCachePath(account, mac string) (string, error) {
+func loadGWellSessionCache(account, mac string) (*GWellSessionCache, error) {
+	path, err := gwellCachePath(account, mac, "session.json")
+	if err != nil {
+		return nil, err
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var cache GWellSessionCache
+	if err = json.Unmarshal(b, &cache); err != nil {
+		return nil, fmt.Errorf("wyze/gwell: decode session cache %s: %w", path, err)
+	}
+	if cache.ServerAddr == "" || len(cache.Devices) == 0 {
+		return nil, fmt.Errorf("wyze/gwell: incomplete session cache")
+	}
+	return &cache, nil
+}
+
+func saveGWellSessionCache(account, mac string, cache *GWellSessionCache) error {
+	path, err := gwellCachePath(account, mac, "session.json")
+	if err != nil {
+		return err
+	}
+	if err = os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("wyze/gwell: create cache dir: %w", err)
+	}
+	b, err := json.Marshal(cache)
+	if err != nil {
+		return fmt.Errorf("wyze/gwell: encode session cache: %w", err)
+	}
+	if err = os.WriteFile(path, b, 0o600); err != nil {
+		return fmt.Errorf("wyze/gwell: write session cache %s: %w", path, err)
+	}
+	return nil
+}
+
+func deleteGWellSessionCache(account, mac string) error {
+	path, err := gwellCachePath(account, mac, "session.json")
+	if err != nil {
+		return err
+	}
+	err = os.Remove(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("wyze/gwell: delete session cache %s: %w", path, err)
+	}
+	return nil
+}
+
+func gwellCachePath(account, mac, file string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("wyze/gwell: locate home dir: %w", err)
 	}
-	return filepath.Join(home, ".cache", "go2rtc", "wyze", "gwell", sanitizeCachePathSegment(account), sanitizeCachePathSegment(mac)+".json"), nil
+	return filepath.Join(home, ".cache", "go2rtc", "wyze", "gwell", sanitizeCachePathSegment(account), sanitizeCachePathSegment(mac), file), nil
 }
 
 func sanitizeCachePathSegment(s string) string {

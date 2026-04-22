@@ -18,6 +18,7 @@ type GWellClient struct {
 	rawData chan *gwelllib.DecodedPayload
 	host    string
 	mac     string
+	account string
 	verbose bool
 	talkHeaderMu     sync.Mutex
 	talkHeaderPrimed bool
@@ -30,6 +31,8 @@ func DialGWell(rawURL string) (*GWellClient, error) {
 	}
 
 	query := u.Query()
+	account := query.Get("account")
+	mac := query.Get("mac")
 	accessID, accessToken, err := resolveGWellAccessCredentialsFromURL(u, false)
 	if err != nil {
 		return nil, err
@@ -55,10 +58,10 @@ func DialGWell(rawURL string) (*GWellClient, error) {
 
 	writer := newGWellAnnexBWriter()
 	rawData := make(chan *gwelllib.DecodedPayload, 256)
-	sess := gwelllib.NewSession(gwelllib.SessionConfig{
+	cfg := gwelllib.SessionConfig{
 		Token:       token,
 		CameraLanIP: cameraLANIP,
-		DeviceName:  query.Get("mac"),
+		DeviceName:  mac,
 		H264Writer:  writer,
 		RawDataHandler: func(p *gwelllib.DecodedPayload) {
 			select {
@@ -66,14 +69,22 @@ func DialGWell(rawURL string) (*GWellClient, error) {
 			default:
 			}
 		},
-	})
+	}
+	if account != "" && mac != "" {
+		if cache, cacheErr := loadGWellSessionCache(account, mac); cacheErr == nil {
+			cfg.ServerAddr = cache.ServerAddr
+			cfg.Devices = append([]gwelllib.DeviceInfo(nil), cache.Devices...)
+		}
+	}
+	sess := gwelllib.NewSession(cfg)
 
 	return &GWellClient{
 		session: sess,
 		writer:  writer,
 		rawData: rawData,
 		host:    host,
-		mac:     query.Get("mac"),
+		mac:     mac,
+		account: account,
 		verbose: query.Get("verbose") == "true",
 	}, nil
 }
@@ -278,6 +289,21 @@ func (c *GWellClient) RemoteAddr() net.Addr {
 		return nil
 	}
 	return gwellAddr(c.host)
+}
+
+func (c *GWellClient) CacheDiscoveryState() error {
+	if c == nil || c.session == nil || c.account == "" || c.mac == "" {
+		return nil
+	}
+	state := c.session.DiscoveryState()
+	if state == nil || state.ServerAddr == "" || len(state.Devices) == 0 {
+		return nil
+	}
+	return saveGWellSessionCache(c.account, c.mac, &GWellSessionCache{
+		ServerAddr: state.ServerAddr,
+		Devices:    append([]gwelllib.DeviceInfo(nil), state.Devices...),
+		UpdatedAt:  time.Now().UTC(),
+	})
 }
 
 type gwellAddr string

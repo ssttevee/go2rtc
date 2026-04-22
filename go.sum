@@ -73,8 +73,8 @@ github.com/sigurn/crc16 v0.0.0-20240131213347-83fcde1e29d1 h1:NVK+OqnavpyFmUiKfU
 github.com/sigurn/crc16 v0.0.0-20240131213347-83fcde1e29d1/go.mod h1:9/etS5gpQq9BJsJMWg1wpLbfuSnkm8dPF6FdW2JXVhA=
 github.com/sigurn/crc8 v0.0.0-20220107193325-2243fe600f9f h1:1R9KdKjCNSd7F8iGTxIpoID9prlYH8nuNYKt0XvweHA=
 github.com/sigurn/crc8 v0.0.0-20220107193325-2243fe600f9f/go.mod h1:vQhwQ4meQEDfahT5kd61wLAF5AAeh5ZPLVI4JJ/tYo8=
-github.com/ssttevee/hacky-wyze-gwell/wyze-p2p v0.0.0-20260421222404-e50f3a329c2c h1:DVD9P40/fgiuGGNbUIYPFQc/O/fzSxMBlTUNZwKYFCM=
-github.com/ssttevee/hacky-wyze-gwell/wyze-p2p v0.0.0-20260421222404-e50f3a329c2c/go.mod h1:rh8XSAHcmbeG58j4/zc0zFy7X9BhWoKbntXCmCA6y8Y=
+github.com/ssttevee/hacky-wyze-gwell/wyze-p2p v0.0.0-20260422012111-501a642c3105 h1:JVA07ZoYX2uwThR+6xSGc6WnrAThp6AM141se+tySoE=
+github.com/ssttevee/hacky-wyze-gwell/wyze-p2p v0.0.0-20260422012111-501a642c3105/go.mod h1:rh8XSAHcmbeG58j4/zc0zFy7X9BhWoKbntXCmCA6y8Y=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/tadglines/go-pkgs v0.0.0-20210623144937-b983b20f54f9 h1:aeN+ghOV0b2VCmKKO3gqnDQ8mLbpABZgRR2FVYx4ouI=

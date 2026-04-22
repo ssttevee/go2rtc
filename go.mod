@@ -49,4 +49,4 @@ require (
 	golang.org/x/tools v0.41.0 // indirect
 )
 
-replace github.com/wlatic/wyze-gwell-bridge/wyze-p2p => github.com/ssttevee/hacky-wyze-gwell/wyze-p2p v0.0.0-20260421222404-e50f3a329c2c
+replace github.com/wlatic/wyze-gwell-bridge/wyze-p2p => github.com/ssttevee/hacky-wyze-gwell/wyze-p2p v0.0.0-20260422012111-501a642c3105

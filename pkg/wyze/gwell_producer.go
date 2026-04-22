@@ -97,6 +97,7 @@ func NewGWellProducer(rawURL string) (*GWellProducer, error) {
 	medias, err := probeGWell(client)
 	if err != nil {
 		_ = client.Close()
+		_ = deleteGWellSessionCache(client.account, client.mac)
 		if _, _, refreshErr := resolveGWellAccessCredentials(rawURL, true); refreshErr == nil {
 			client, err = DialGWell(rawURL)
 			if err == nil {
@@ -107,6 +108,7 @@ func NewGWellProducer(rawURL string) (*GWellProducer, error) {
 			return nil, err
 		}
 	}
+	_ = client.CacheDiscoveryState()
 
 	prod := &GWellProducer{
 		Connection: core.Connection{
