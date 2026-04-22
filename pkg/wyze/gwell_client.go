@@ -30,10 +30,12 @@ func DialGWell(rawURL string) (*GWellClient, error) {
 	}
 
 	query := u.Query()
-	accessID := query.Get("access_id")
-	accessToken := query.Get("access_token")
+	accessID, accessToken, err := resolveGWellAccessCredentialsFromURL(u, false)
+	if err != nil {
+		return nil, err
+	}
 	if accessID == "" || accessToken == "" {
-		return nil, fmt.Errorf("wyze/gwell: access_id and access_token are required")
+		return nil, fmt.Errorf("wyze/gwell: access credentials unavailable")
 	}
 
 	token, err := gwelllib.ParseAccessToken(accessID, accessToken)

@@ -28,6 +28,17 @@ func Init() {
 	app.LoadConfig(&v)
 
 	accounts = v.Cfg
+	wyze.SetGWellAccountProvider(func(account string) (*wyze.AccountCredentials, error) {
+		cfg, ok := accounts[account]
+		if !ok {
+			return nil, fmt.Errorf("wyze: account not found: %s", account)
+		}
+		return &wyze.AccountCredentials{
+			APIKey:   cfg.APIKey,
+			APIID:    cfg.APIID,
+			Password: cfg.Password,
+		}, nil
+	})
 
 	log := app.GetLogger("wyze")
 
@@ -190,11 +201,6 @@ func apiAuth(w http.ResponseWriter, r *http.Request) {
 
 func buildStreamURL(cloud *wyze.Cloud, account string, cam *wyze.Camera) (string, error) {
 	if wyze.IsGWellCamera(cam) {
-		cred, err := cloud.GetGWellAccessCredential(cam.MAC)
-		if err != nil {
-			return "", err
-		}
-
 		host := cam.IP
 		if info, err := cloud.GetDeviceInfo(cam.MAC, cam.ProductModel); err == nil {
 			if ip, _ := info["ip"].(string); ip != "" {
@@ -213,8 +219,6 @@ func buildStreamURL(cloud *wyze.Cloud, account string, cam *wyze.Camera) (string
 		query.Set("account", account)
 		query.Set("mac", cam.MAC)
 		query.Set("model", cam.ProductModel)
-		query.Set("access_id", cred.AccessID)
-		query.Set("access_token", cred.AccessToken)
 		return fmt.Sprintf("wyze://%s?%s", host, query.Encode()), nil
 	}
 

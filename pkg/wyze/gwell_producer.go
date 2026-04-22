@@ -97,7 +97,15 @@ func NewGWellProducer(rawURL string) (*GWellProducer, error) {
 	medias, err := probeGWell(client)
 	if err != nil {
 		_ = client.Close()
-		return nil, err
+		if _, _, refreshErr := resolveGWellAccessCredentials(rawURL, true); refreshErr == nil {
+			client, err = DialGWell(rawURL)
+			if err == nil {
+				medias, err = probeGWell(client)
+			}
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	prod := &GWellProducer{
