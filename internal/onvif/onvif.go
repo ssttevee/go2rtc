@@ -292,10 +292,27 @@ func parsePTZTimeout(value string) time.Duration {
 }
 
 func getActiveGWellProducer(token string) (*wyze.GWellProducer, error) {
+	prod, err := getActiveGWellProducerRecursive(token, map[string]struct{}{})
+	if err != nil {
+		return nil, err
+	}
+	if prod != nil {
+		return prod, nil
+	}
+	return nil, fmt.Errorf("onvif/ptz: active gwell producer not found for stream: %s", token)
+}
+
+func getActiveGWellProducerRecursive(token string, visited map[string]struct{}) (*wyze.GWellProducer, error) {
+	if _, ok := visited[token]; ok {
+		return nil, nil
+	}
+	visited[token] = struct{}{}
+
 	stream := streams.Get(token)
 	if stream == nil {
 		return nil, fmt.Errorf("onvif/ptz: stream not found: %s", token)
 	}
+
 	for _, producer := range stream.Producers() {
 		if producer == nil {
 			continue
@@ -308,7 +325,43 @@ func getActiveGWellProducer(token string) (*wyze.GWellProducer, error) {
 			return gwellProd, nil
 		}
 	}
-	return nil, fmt.Errorf("onvif/ptz: active gwell producer not found for stream: %s", token)
+
+	for _, source := range stream.Sources() {
+		upstream := getLocalRTSPStreamName(source)
+		if upstream == "" {
+			continue
+		}
+		prod, err := getActiveGWellProducerRecursive(upstream, visited)
+		if err != nil {
+			if strings.Contains(err.Error(), "stream not found") {
+				continue
+			}
+			return nil, err
+		}
+		if prod != nil {
+			return prod, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func getLocalRTSPStreamName(source string) string {
+	u, err := url.Parse(source)
+	if err != nil {
+		return ""
+	}
+	if u.Scheme != "rtsp" && u.Scheme != "rtsps" && u.Scheme != "rtspx" {
+		return ""
+	}
+	host := u.Hostname()
+	if host != "127.0.0.1" && host != "localhost" {
+		return ""
+	}
+	if u.Path == "" || u.Path == "/" {
+		return ""
+	}
+	return strings.TrimPrefix(u.Path, "/")
 }
 
 func apiOnvif(w http.ResponseWriter, r *http.Request) {
