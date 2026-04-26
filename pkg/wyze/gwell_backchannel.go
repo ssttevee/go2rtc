@@ -42,7 +42,10 @@ func (p *GWellProducer) AddTrack(media *core.Media, codec *core.Codec, track *co
 		return err
 	}
 
+	done := make(chan struct{})
+
 	go func() {
+		defer close(done)
 		defer cmd.Close()
 		defer stdin.Close()
 		if err := p.client.PlayDuoTalkAMR(stdout); err != nil {
@@ -63,10 +66,13 @@ func (p *GWellProducer) AddTrack(media *core.Media, codec *core.Codec, track *co
 
 	sender := core.NewSender(media, track.Codec)
 	sender.Handler = func(pkt *rtp.Packet) {
+		select {
+		case <-done:
+			return
+		default:
+		}
 		if n, err := stdin.Write(pkt.Payload); err == nil {
 			p.Send += n
-		} else {
-			fmt.Printf("[wyze/gwell] backchannel stdin write failed: %v\n", err)
 		}
 	}
 	sender.HandleRTP(track)
@@ -148,16 +154,18 @@ func (c *GWellClient) PlayDuoTalkAMR(rd io.Reader) error {
 	}
 
 startTalk:
-	if err := c.SendDefaultDuoTalkHeader(); err != nil {
-		return err
-	}
-	time.Sleep(40 * time.Millisecond)
-	if err := c.SetDuoTalkEnabled(true); err != nil {
+	// Native app sequence: send enable command 4 times first, then AV header, then audio.
+	// The OG camera requires multiple enable commands with incrementing sequence numbers
+	// before it will accept audio data.
+	if err := c.SetTalkEnabledWithRetries(true, 4); err != nil {
 		return err
 	}
 	defer func() { _ = c.SetDuoTalkEnabled(false) }()
+
+	// Wait for camera to process enable commands and respond
 	time.Sleep(100 * time.Millisecond)
 
+	// Send AV header after camera has acknowledged
 	if err := c.SendDefaultDuoTalkHeader(); err != nil {
 		return err
 	}
