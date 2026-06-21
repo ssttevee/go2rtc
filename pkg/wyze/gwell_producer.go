@@ -268,7 +268,10 @@ func probeGWell(client *GWellClient) ([]*core.Media, error) {
 	}
 	acodec := probeGWellAudioCodec(client, 1500*time.Millisecond)
 	if acodec == nil {
-		acodec = &core.Codec{Name: core.CodecAAC}
+		acodec = &core.Codec{
+			Name:        core.CodecAAC,
+			PayloadType: core.PayloadTypeRAW,
+		}
 	}
 
 	client.writer.mu.Lock()
