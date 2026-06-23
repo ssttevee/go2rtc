@@ -38,6 +38,12 @@ func (w *gwellAnnexBWriter) Write(p []byte) (int, error) {
 		return 0, io.ErrClosedPipe
 	}
 
+	// Empty write: keep cond/signal chain alive without buffering garbage.
+	if len(p) == 0 {
+		w.cond.Broadcast()
+		return 0, nil
+	}
+
 	w.buf = append(w.buf, p...)
 	for {
 		i := annexb.IndexFrame(w.buf)
